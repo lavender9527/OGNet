@@ -6,10 +6,6 @@
 
 ![img1](https://github.com/xaggi/OGNet/blob/master/imgs/OGNet_architect.png)
 
-[17.6.2020] For the time being, test code (and some trained models) are being made available. Training code will be uploaded in some time.
-
-[05.3.2021] A mockup training code is uploaded which can be used for training and evaluation of the model.
-
 ## Requirements
 
 - Python2.7
@@ -36,6 +32,16 @@ Previously, only test codes were provided for which test.py file was needed to r
 
 ## MNIST training and testing details
 The [models provided](https://drive.google.com/drive/folders/1onNezvWJCfaKndvzOc3CXXnNidjosVvn?usp=sharing) are trained on the training set of '0' class in MNIST dataset. For evaluation, the test dataset [provided](https://drive.google.com/drive/folders/1Cj28-1aV4AXtdm9j_CEs3UArLodc0GY4?usp=sharing) contains all test images from class '0' as inliers, whereas 100 images each from all other classes as outliers.
+
+
+
+## Updates
+
+[17.6.2020] For the time being, test code (and some trained models) are being made available. Training code will be uploaded in some time.
+
+[05.3.2021] A mockup training code is uploaded which can be used for training and evaluation of the model.
+
+
 
 For any queries, please feel free to contact Zaigham through mzz . pieas @ gmail . com
 
