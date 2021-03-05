@@ -7,7 +7,8 @@
 ![img1](https://github.com/xaggi/OGNet/blob/master/imgs/OGNet_architect.png)
 
 [17.6.2020] For the time being, test code (and some trained models) are being made available. Training code will be uploaded in some time.
-[05.3.2021] A mockup training code is uploaded which can be used for training and evaluation of the model. 
+
+[05.3.2021] A mockup training code is uploaded which can be used for training and evaluation of the model.
 
 ## Requirements
 
