@@ -11,8 +11,9 @@ from fine_tune_dicriminator import fine_tune
 from utils import gaussian
 from dataloader import load_data
 from sklearn import metrics
+import os
 
-def check_auc(g_model_path, d_model_path, i):
+def check_auc(g_model_path, d_model_path, num_epoch, save_images):
     opt_auc = parse_opts()
     opt_auc.batch_shuffle = False
     opt_auc.drop_last = False
@@ -20,7 +21,7 @@ def check_auc(g_model_path, d_model_path, i):
     dataloader = load_data(opt_auc)
     model = OGNet(opt_auc, dataloader)
     model.cuda()
-    d_results, labels = model.test_patches(g_model_path, d_model_path, i)
+    d_results, labels = model.test_patches(g_model_path, d_model_path, num_epoch,save_images=save_images)
     d_results = np.concatenate(d_results)
     labels = np.concatenate(labels)
     fpr1, tpr1, thresholds1 = metrics.roc_curve(labels, d_results, pos_label=1)  # (y, score, positive_label)
@@ -41,7 +42,7 @@ class OGNet(nn.Module):
 
     def __init__(self, opt, dataloader):
         super(OGNet, self).__init__()
-        self.adversarial_training_factor  = opt.adversarial_training_factor
+        self.adversarial_training_factor = opt.adversarial_training_factor
         self.g_learning_rate = opt.g_learning_rate
         self.d_learning_rate = opt.d_learning_rate
         self.epoch = opt.epoch
@@ -55,11 +56,11 @@ class OGNet(nn.Module):
         self.filename = ''
         self.n_row_in_grid = opt.n_row_in_grid
 
-    def train(self, normal_class):
+    def train(self, normal_class, save_images_after_phase2=False):
         self.g.train()
         self.d.train()
 
-        # Set optimizators
+        # Set optimizers
         g_optim = optim.Adam(self.g.parameters(), lr=self.g_learning_rate)
         d_optim = optim.Adam(self.d.parameters(), lr=self.d_learning_rate)
 
@@ -67,7 +68,6 @@ class OGNet(nn.Module):
         valid = torch.zeros([self.batch_size], dtype=torch.float32).cuda()
         print('Training until high epoch...')
         for num_epoch in range(self.epoch):
-            # print("Epoch {0}".format(num_epoch))
             for i, data in enumerate(self.dataloader):
                 input, gt_label = data
                 input = input.cuda()
@@ -75,10 +75,10 @@ class OGNet(nn.Module):
                 g_optim.zero_grad()
                 d_optim.zero_grad()
                 sigma = self.sigma_noise ** 2
-                input_w_noise = gaussian(input, 1, 0, sigma)  #Noise
-                # Inference from generator
+                input_w_noise = gaussian(input, 1, 0, sigma)  # Noise
                 g_output = self.g(input_w_noise)
 
+                # Save images for training samples
                 vutils.save_image(input[0:self.image_grids_numbers, :, :, :],
                                   './results/%03d_real_samples_epoch.png' % (num_epoch), nrow=self.n_row_in_grid, normalize=True)
                 vutils.save_image(g_output[0:self.image_grids_numbers, :, :, :],
@@ -88,24 +88,26 @@ class OGNet(nn.Module):
 
                 #######################
                 #######################
-                d_fake_output = self.d(g_output)
+                d_fake_output = self.d(g_output.detach())
                 d_real_output = self.d(input)
                 d_fake_loss = F.binary_cross_entropy(torch.squeeze(d_fake_output), fake)
                 d_real_loss = F.binary_cross_entropy(torch.squeeze(d_real_output), valid)
                 d_sum_loss = 0.5 * (d_fake_loss + d_real_loss)
-                d_sum_loss.backward(retain_graph=True)
+                d_sum_loss.backward()
                 d_optim.step()
                 g_optim.zero_grad()
 
                 ##############################################
+                d_fake_output = self.d(g_output)
                 g_recon_loss = F.mse_loss(g_output, input)
                 g_adversarial_loss = F.binary_cross_entropy(d_fake_output.squeeze(), valid)
-                g_sum_loss = (1-self.adversarial_training_factor)*g_recon_loss + self.adversarial_training_factor*g_adversarial_loss
+                g_sum_loss = (1 - self.adversarial_training_factor) * g_recon_loss + self.adversarial_training_factor * g_adversarial_loss
                 g_sum_loss.backward()
                 g_optim.step()
 
-                if i%1 == 0:
-                    opts_ft = parse_opts_ft() #opts for phase two
+                #Run phase two every 5 iterations
+                if i % 5 == 0:
+                    opts_ft = parse_opts_ft()  # opts for phase two
 
                     if num_epoch == opts_ft.low_epoch:
                         g_model_name = 'g_low_epoch'
@@ -138,31 +140,27 @@ class OGNet(nn.Module):
                         high_epoch_d_model_name = 'd_high_epoch'
                         g_model_save_path = './models/' + high_epoch_g_model_name
                         d_model_save_path = './models/' + high_epoch_d_model_name
-                        check_auc(g_model_save_path, d_model_save_path,1)
-                        fine_tune() #Phase two
+                        check_auc(g_model_save_path, d_model_save_path, num_epoch,save_images=False)
+                        fine_tune()  # Phase two
                         print('After phase two: ')
                         high_epoch_g_model_name = 'g_high_epoch'
                         high_epoch_d_model_name = 'd_high_epoch'
                         g_model_save_path = './models/' + high_epoch_g_model_name
                         d_model_save_path = './models/' + high_epoch_d_model_name
-
-                        check_auc(g_model_save_path, d_model_save_path,1)
-
-    def test_patches(self,g_model_path, d_model_path,i):  #test all images/patches present inside a folder on given g and d models. Returns d score of each patch
+                        check_auc(g_model_save_path, d_model_save_path,num_epoch,save_images=True)
+                        
+    def test_patches(self, g_model_path, d_model_path, num_epoch,save_images):
         checkpoint_epoch_g = -1
-        g_checkpoint = torch.load(g_model_path)
+        g_checkpoint = torch.load(g_model_path, weights_only=True)
         self.g.load_state_dict(g_checkpoint['g_model_state_dict'])
         checkpoint_epoch_g = g_checkpoint['epoch']
-        if checkpoint_epoch_g is -1:
+        if checkpoint_epoch_g == -1:
             raise Exception("g_model not loaded")
-        else:
-            pass
-        d_checkpoint = torch.load(d_model_path)
+
+        d_checkpoint = torch.load(d_model_path, weights_only=True)
         self.d.load_state_dict(d_checkpoint['d_model_state_dict'])
         checkpoint_epoch_d = d_checkpoint['epoch']
-        if checkpoint_epoch_g == checkpoint_epoch_d:
-            pass
-        else:
+        if checkpoint_epoch_g != checkpoint_epoch_d:
             raise Exception("d_model not loaded or model mismatch between g and d")
 
         self.g.eval()
@@ -170,12 +168,23 @@ class OGNet(nn.Module):
         labels = []
         d_results = []
         count = 0
+
         for input, label in self.dataloader:
             input = input.cuda()
             g_output = self.g(input)
             d_fake_output = self.d(g_output)
-            count +=1
+
+            # Save images if the flag is set
+            if save_images:
+                test_dir = f'./results/test/epoch_{num_epoch}'
+                os.makedirs(test_dir, exist_ok=True)
+                vutils.save_image(input[0:self.image_grids_numbers, :, :, :],
+                                  f'{test_dir}/%02d_real_samples.png'% (count),nrow=self.n_row_in_grid, normalize=True)
+                vutils.save_image(g_output[0:self.image_grids_numbers, :, :, :],
+                                  f'{test_dir}/%02d_fake_samples.png'% (count), nrow=self.n_row_in_grid, normalize=True)
+
+            count += 1
             d_results.append(d_fake_output.cpu().detach().numpy())
             labels.append(label)
-        return d_results, labels
 
+        return d_results, labels
